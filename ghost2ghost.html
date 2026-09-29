@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ghost2ghost</title>
+<style>
+:root{
+  --bg:#0d0b14; --card:#161222; --ink:#eae6f5; --sub:#8d84a8;
+  --accent:#9d7bff; --accent2:#5ee9d6; --line:#2a2440; --mine:#3a2f66;
+}
+*{box-sizing:border-box;}
+body{margin:0;background:radial-gradient(circle at 50% 0%, #1c1533, var(--bg));color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh;display:flex;flex-direction:column;}
+#app{max-width:520px;width:100%;margin:0 auto;padding:16px 14px;display:flex;flex-direction:column;flex:1;min-height:100vh;}
+h1{font-size:20px;margin:2px 0 0;letter-spacing:.02em;}
+.sub{color:var(--sub);font-size:12.5px;margin-bottom:14px;}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:14px;}
+label{font-size:12px;color:var(--sub);display:block;margin-bottom:6px;}
+input[type=text]{width:100%;background:#0d0b14;border:1px solid var(--line);border-radius:10px;padding:11px 13px;color:var(--ink);font:inherit;margin-bottom:12px;}
+button{font:inherit;border:none;border-radius:12px;padding:12px 16px;cursor:pointer;font-weight:700;}
+.btn-primary{background:var(--accent);color:#0d0b14;width:100%;}
+.btn-ghost{background:transparent;color:var(--accent);border:1px solid var(--accent);width:100%;margin-top:8px;}
+.online{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
+.chip{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:5px 10px;font-size:12px;color:var(--sub);}
+.chip .you{color:var(--accent);font-weight:700;}
+#feed{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:4px 2px 10px;min-height:180px;}
+.msg{max-width:80%;padding:10px 13px;border-radius:16px;background:var(--card);border:1px solid var(--line);align-self:flex-start;}
+.msg.mine{align-self:flex-end;background:var(--mine);border-color:var(--accent);}
+.msg .who{font-size:11px;color:var(--accent2);margin-bottom:3px;font-weight:600;}
+.msg.mine .who{color:var(--accent);}
+.msg .txt{font-size:14.5px;line-height:1.4;white-space:pre-wrap;word-break:break-word;}
+.composer{display:flex;gap:8px;padding-top:10px;border-top:1px solid var(--line);}
+.composer input{flex:1;margin:0;}
+.composer button{background:var(--accent);color:#0d0b14;}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+.leave{background:var(--card);color:var(--sub);font-size:12px;padding:7px 12px;}
+.roomcode{font-size:12px;color:var(--accent2);}
+.center{text-align:center;color:var(--sub);padding:30px 0;font-size:14px;}
+.note{font-size:11.5px;color:var(--sub);margin-top:10px;line-height:1.5;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const ADJ=["Wandering","Faint","Hollow","Drifting","Restless","Pale","Quiet","Lingering","Whispering","Foggy","Weary","Lost","Silent","Gentle","Curious","Stray"];
+const NOUN=["Ghost","Spirit","Shade","Phantom","Wraith","Specter","Echo","Apparition","Soul","Haze"];
+const EMOJI=["👻","🕯️","🌫️","🕸️","🦇","🌘","💀","🔮"];
+function hash(s){let h=0;for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))>>>0;return h;}
+function ghostAlias(id){const h=hash(id);return {label:ADJ[h%ADJ.length]+" "+NOUN[(h>>>4)%NOUN.length], emoji:EMOJI[(h>>>8)%EMOJI.length]};}
+function randomCode(){const w=NOUN[Math.floor(Math.random()*NOUN.length)].toLowerCase();return w+'-'+Math.floor(1000+Math.random()*9000);}
+
+let myId = localStorage.getItem('g2g:myid');
+if(!myId){ myId='u'+Math.random().toString(36).slice(2,10)+Date.now().toString(36); localStorage.setItem('g2g:myid', myId); }
+
+let room=null, channel=null, players={}, messages=[];
+
+function storeKey(){ return 'g2g:room:'+room; }
+function loadRoom(){
+  try{ const raw=localStorage.getItem(storeKey()); const d=raw?JSON.parse(raw):{players:{},messages:[]}; players=d.players||{}; messages=d.messages||[]; }
+  catch(e){ players={}; messages=[]; }
+}
+function saveRoom(){ localStorage.setItem(storeKey(), JSON.stringify({players, messages})); }
+
+function renderLobby(){
+  const app=document.getElementById('app');
+  app.innerHTML = `
+    <h1>👻 ghost2ghost</h1>
+    <div class="sub">Anonymous talk, no games. Create a room or join one with a code.</div>
+    <div class="card">
+      <label>Room code</label>
+      <input id="codeInput" type="text" placeholder="e.g. echo-4821" autocomplete="off">
+      <button class="btn-primary" id="joinBtn">Enter room</button>
+      <button class="btn-ghost" id="createBtn">Create a new room</button>
+      <div class="note">This runs fully in your browser — no server. People opening this exact file on the <b>same device/browser</b> (e.g. different tabs) sync live in a room instantly. To let people on other devices join, host this file somewhere public (e.g. GitHub Pages) and share that link plus the room code.</div>
+    </div>`;
+  document.getElementById('createBtn').onclick=()=>{ document.getElementById('codeInput').value = randomCode(); };
+  document.getElementById('joinBtn').onclick=()=>{
+    const v=document.getElementById('codeInput').value.trim().toLowerCase().replace(/\s+/g,'-');
+    if(v) enterRoom(v);
+  };
+  document.getElementById('codeInput').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('joinBtn').click(); });
+}
+
+function enterRoom(code){
+  room=code;
+  loadRoom();
+  players[myId] = {lastSeen: Date.now()};
+  saveRoom();
+  channel = new BroadcastChannel('g2g-room-'+room);
+  channel.onmessage = (e)=>{ if(e.data && e.data.type==='sync'){ loadRoom(); paintOnline(); paintFeed(); } };
+  window.addEventListener('storage', (e)=>{ if(room && e.key===storeKey()){ loadRoom(); paintOnline(); paintFeed(); } });
+  renderRoom();
+}
+
+function broadcastSync(){ saveRoom(); try{ channel.postMessage({type:'sync'}); }catch(e){} }
+
+function renderRoom(){
+  const app=document.getElementById('app');
+  app.innerHTML = `
+    <div class="topbar">
+      <div>
+        <h1 style="margin-bottom:2px;">👻 ghost2ghost</h1>
+        <div class="roomcode">room: ${room}</div>
+      </div>
+      <button class="leave" id="leaveBtn">Leave</button>
+    </div>
+    <div id="online" class="online"></div>
+    <div id="feed"></div>
+    <div class="composer">
+      <input id="input" type="text" placeholder="Say something into the void…" maxlength="500" autocomplete="off">
+      <button id="send">Send</button>
+    </div>`;
+  document.getElementById('leaveBtn').onclick=()=>{ if(channel) channel.close(); room=null; renderLobby(); };
+  document.getElementById('send').onclick=sendMessage;
+  document.getElementById('input').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); sendMessage(); } });
+  paintOnline();
+  paintFeed();
+}
+
+function paintOnline(){
+  const box=document.getElementById('online'); if(!box) return;
+  box.innerHTML='';
+  const now=Date.now();
+  Object.keys(players).filter(id=> now-(players[id].lastSeen||0) < 120000).forEach(id=>{
+    const a=ghostAlias(id);
+    const chip=document.createElement('div');
+    chip.className='chip';
+    chip.innerHTML=`${a.emoji} ${a.label}${id===myId?' <span class="you">(you)</span>':''}`;
+    box.appendChild(chip);
+  });
+}
+
+function paintFeed(){
+  const feed=document.getElementById('feed'); if(!feed) return;
+  const stick = feed.scrollTop + feed.clientHeight >= feed.scrollHeight - 40;
+  feed.innerHTML='';
+  if(messages.length===0){
+    feed.innerHTML='<div class="center">No messages yet. Break the silence.</div>';
+  }
+  messages.slice().sort((a,b)=>a.ts-b.ts).forEach(m=>{
+    const a=ghostAlias(m.authorId);
+    const mine=m.authorId===myId;
+    const div=document.createElement('div');
+    div.className='msg'+(mine?' mine':'');
+    const who=document.createElement('div'); who.className='who'; who.textContent = mine?'you':(a.emoji+' '+a.label);
+    const txt=document.createElement('div'); txt.className='txt'; txt.textContent=m.text;
+    div.appendChild(who); div.appendChild(txt);
+    feed.appendChild(div);
+  });
+  if(stick) feed.scrollTop = feed.scrollHeight;
+}
+
+function sendMessage(){
+  const input=document.getElementById('input');
+  const text=input.value.trim();
+  if(!text) return;
+  input.value='';
+  loadRoom();
+  messages.push({authorId:myId, text, ts:Date.now()});
+  players[myId] = {lastSeen: Date.now()};
+  broadcastSync();
+  paintFeed();
+}
+
+setInterval(()=>{
+  if(!room) return;
+  loadRoom();
+  players[myId] = {lastSeen: Date.now()};
+  broadcastSync();
+  paintOnline();
+}, 30000);
+
+renderLobby();
+</script>
+</body>
+</html>
